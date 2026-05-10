@@ -8,6 +8,7 @@ import io
 import json
 import os
 import pathlib
+import re
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -18,6 +19,10 @@ from mcp.server.fastmcp import FastMCP
 load_dotenv(os.environ.get("DOTENV_PATH", "/opt/health/.env"))
 TOKEN = os.getenv("HEALTH_TOKEN")
 DATA_DIR = pathlib.Path(os.getenv("DATA_DIR", "/opt/health/data"))
+REPORTS_DIR = pathlib.Path(os.getenv("REPORTS_DIR", "/opt/health/reports"))
+
+_MAX_REPORT_BYTES = 200_000
+_REPORT_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 mcp = FastMCP("apple-health", stateless_http=True)
 mcp.settings.transport_security.enable_dns_rebinding_protection = False
@@ -395,6 +400,103 @@ def get_baselines(days: int = 30) -> str:
         {"baselines": baselines, "days_requested": days},
         indent=2,
         default=str,
+    )
+
+
+# --- Daily report read/write tools ------------------------------------------
+
+
+def _resolve_report_date(date: str | None) -> str:
+    """Validate and normalise a YYYY-MM-DD report date, defaulting to today."""
+    if date is None:
+        return datetime.now().date().isoformat()
+    if not _REPORT_DATE_RE.match(date):
+        raise ValueError(f"invalid date: {date!r}; expected YYYY-MM-DD")
+    # Strict parse — rejects e.g. 2026-13-01.
+    datetime.strptime(date, "%Y-%m-%d")
+    return date
+
+
+@mcp.tool()
+def save_health_report(content: str, date: str | None = None) -> str:
+    """Persist a daily HEALTH REPORT (markdown) to the reports directory.
+
+    The scheduled report-generation routine calls this at the end of its run.
+    Files are written as ``REPORTS_DIR/<YYYY-MM-DD>.md`` and overwrite any
+    existing file for the same date. ``date`` defaults to today; pass an
+    explicit ``YYYY-MM-DD`` to back-date or future-date a report.
+
+    Returns ``{"saved": "<path>", "bytes": N, "date": "<YYYY-MM-DD>"}`` on
+    success or ``{"error": "<message>"}`` on validation failure.
+    """
+    if not isinstance(content, str) or not content.strip():
+        return json.dumps({"error": "content must be a non-empty string"})
+    encoded = content.encode("utf-8")
+    if len(encoded) > _MAX_REPORT_BYTES:
+        return json.dumps({"error": f"content exceeds {_MAX_REPORT_BYTES} bytes"})
+    try:
+        resolved = _resolve_report_date(date)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
+
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    target = REPORTS_DIR / f"{resolved}.md"
+    target.write_bytes(encoded)
+    return json.dumps(
+        {"saved": str(target), "bytes": target.stat().st_size, "date": resolved}
+    )
+
+
+@mcp.tool()
+def get_health_report(date: str | None = None, max_age_days: int = 7) -> str:
+    """Read a daily HEALTH REPORT from the reports directory.
+
+    With ``date`` set to ``YYYY-MM-DD``: returns that day's report or a
+    no-report sentinel.
+
+    With ``date`` left as ``None``: returns the most recent report whose
+    filename date is within ``max_age_days`` of today. Useful for the
+    Fitness Coach Agent ("show me today's report").
+
+    Returns ``{"date": "<YYYY-MM-DD>", "content": "<markdown>"}`` on hit or
+    ``{"date": null, "note": "<message>"}`` on miss.
+    """
+    if date is not None:
+        try:
+            resolved = _resolve_report_date(date)
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
+        target = REPORTS_DIR / f"{resolved}.md"
+        if target.exists():
+            return json.dumps(
+                {"date": resolved, "content": target.read_text(encoding="utf-8")}
+            )
+        return json.dumps({"date": None, "note": f"No report for {resolved}."})
+
+    if not REPORTS_DIR.exists():
+        return json.dumps({"date": None, "note": "Reports directory does not exist yet."})
+
+    today = datetime.now().date()
+    cutoff = today - timedelta(days=max_age_days)
+    candidates: list[tuple] = []
+    for path in REPORTS_DIR.glob("*.md"):
+        if not _REPORT_DATE_RE.match(path.stem):
+            continue
+        try:
+            day = datetime.strptime(path.stem, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if day >= cutoff:
+            candidates.append((day, path))
+
+    if not candidates:
+        return json.dumps(
+            {"date": None, "note": f"No report in the last {max_age_days} day(s)."}
+        )
+    candidates.sort()
+    latest_day, latest_path = candidates[-1]
+    return json.dumps(
+        {"date": latest_day.isoformat(), "content": latest_path.read_text(encoding="utf-8")}
     )
 
 
