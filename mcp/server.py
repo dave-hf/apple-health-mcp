@@ -4,17 +4,18 @@ Exposes Apple Health data (CSV exports written by the ingest service) to any
 MCP client over Streamable HTTP. The bearer token is embedded in the URL path
 because Claude's connector UI does not currently support custom auth headers.
 """
+import io
+import json
 import os
 import pathlib
-import json
-import io
+from datetime import datetime, timedelta
+
 import pandas as pd
 import uvicorn
-from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
-load_dotenv("/opt/health/.env")
+load_dotenv(os.environ.get("DOTENV_PATH", "/opt/health/.env"))
 TOKEN = os.getenv("HEALTH_TOKEN")
 DATA_DIR = pathlib.Path(os.getenv("DATA_DIR", "/opt/health/data"))
 
