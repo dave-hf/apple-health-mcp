@@ -90,6 +90,120 @@ def load_all_csv() -> pd.DataFrame:
     return df
 
 
+# --- Daily-aggregation helpers used by the structured tools below -----------
+
+_SLEEP_AGGS = [
+    ("total_h", "Sleep Analysis [Total] (hr)", "first"),
+    ("asleep_h", "Sleep Analysis [Asleep] (hr)", "first"),
+    ("in_bed_h", "Sleep Analysis [In Bed] (hr)", "first"),
+    ("core_h", "Sleep Analysis [Core] (hr)", "first"),
+    ("deep_h", "Sleep Analysis [Deep] (hr)", "first"),
+    ("rem_h", "Sleep Analysis [REM] (hr)", "first"),
+    ("awake_h", "Sleep Analysis [Awake] (hr)", "first"),
+    ("wrist_temp_c", "Apple Sleeping Wrist Temperature (degC)", "mean"),
+]
+
+_FITNESS_AGGS = [
+    ("steps", "Step Count (count)", "sum"),
+    ("distance_km", "Walking + Running Distance (km)", "sum"),
+    ("active_energy_kj", "Active Energy (kJ)", "sum"),
+    ("exercise_min", "Apple Exercise Time (min)", "sum"),
+    ("stand_min", "Apple Stand Time (min)", "sum"),
+    ("flights", "Flights Climbed (count)", "sum"),
+    ("walking_speed_kmh_avg", "Walking Speed (km/hr)", "mean"),
+    ("walking_hr_avg", "Walking Heart Rate Average (count/min)", "mean"),
+    ("vo2_max", "VO2 Max (ml/(kg·min))", "last"),
+]
+
+_VITALS_AGGS = [
+    ("hr_min", "Heart Rate [Min] (count/min)", "min"),
+    ("hr_max", "Heart Rate [Max] (count/min)", "max"),
+    ("hr_avg", "Heart Rate [Avg] (count/min)", "mean"),
+    ("resting_hr", "Resting Heart Rate (count/min)", "mean"),
+    ("hrv_ms", "Heart Rate Variability (ms)", "mean"),
+    ("respiratory_rate", "Respiratory Rate (count/min)", "mean"),
+    ("blood_oxygen_pct", "Blood Oxygen Saturation (%)", "mean"),
+]
+
+# Metrics tracked by get_baselines — drives the report routine's anomaly detection.
+_BASELINE_AGGS = [
+    ("steps", "Step Count (count)", "sum"),
+    ("sleep_total_h", "Sleep Analysis [Total] (hr)", "first"),
+    ("deep_h", "Sleep Analysis [Deep] (hr)", "first"),
+    ("rem_h", "Sleep Analysis [REM] (hr)", "first"),
+    ("hrv_ms", "Heart Rate Variability (ms)", "mean"),
+    ("resting_hr", "Resting Heart Rate (count/min)", "mean"),
+    ("hr_avg", "Heart Rate [Avg] (count/min)", "mean"),
+    ("respiratory_rate", "Respiratory Rate (count/min)", "mean"),
+    ("blood_oxygen_pct", "Blood Oxygen Saturation (%)", "mean"),
+    ("active_energy_kj", "Active Energy (kJ)", "sum"),
+    ("walking_speed_kmh", "Walking Speed (km/hr)", "mean"),
+]
+
+_INTEGER_FIELDS = {"steps", "flights"}
+
+
+def _round_or_none(value, ndigits: int = 2):
+    if value is None or pd.isna(value):
+        return None
+    return round(float(value), ndigits)
+
+
+def _filter_recent(df: pd.DataFrame, days: int) -> pd.DataFrame:
+    if df.empty:
+        return df
+    cutoff = datetime.now() - timedelta(days=days)
+    return df[df["Date/Time"] >= cutoff]
+
+
+def _daily_series(df: pd.DataFrame, col: str, agg: str) -> pd.Series:
+    """Daily aggregate of ``col`` keyed by date, dropping NaN inputs first."""
+    if df.empty or col not in df.columns:
+        return pd.Series([], dtype="float64")
+    sub = df[df[col].notna()][["Date/Time", col]].copy()
+    if sub.empty:
+        return pd.Series([], dtype="float64")
+    sub["date"] = sub["Date/Time"].dt.date
+    return sub.groupby("date")[col].agg(agg)
+
+
+def _build_daily_frame(df: pd.DataFrame, aggs: list[tuple]) -> pd.DataFrame:
+    cols = {key: _daily_series(df, col, agg) for key, col, agg in aggs}
+    return pd.DataFrame(cols)
+
+
+def _records_from_frame(daily: pd.DataFrame) -> list[dict]:
+    if daily.empty:
+        return []
+    records = []
+    for date, row in daily.sort_index().iterrows():
+        if not row.notna().any():
+            continue
+        rec: dict = {"date": str(date)}
+        for col in daily.columns:
+            value = _round_or_none(row[col])
+            if value is not None and col in _INTEGER_FIELDS:
+                value = int(round(value))
+            rec[col] = value
+        records.append(rec)
+    return records
+
+
+def _format_records(records: list[dict], days_requested: int) -> str:
+    return json.dumps(
+        {
+            "records": records,
+            "days_requested": days_requested,
+            "days_returned": len(records),
+        },
+        indent=2,
+        default=str,
+    )
+
+
+# --- Tools -------------------------------------------------------------------
+
+
 @mcp.tool()
 def list_metrics() -> str:
     """List all available health metrics that have data."""
@@ -184,6 +298,104 @@ def get_fitness(days: int = 14) -> str:
         subset=available, how="all"
     )
     return recent.to_string(index=False)
+
+
+@mcp.tool()
+def get_daily_sleep(days: int = 14) -> str:
+    """One JSON record per night with sleep stages and wrist temperature.
+
+    Returns ``{"records": [...], "days_requested": N, "days_returned": M}``
+    where each record has ``date``, sleep-stage fields in hours
+    (``total_h``, ``asleep_h``, ``in_bed_h``, ``core_h``, ``deep_h``,
+    ``rem_h``, ``awake_h``) and ``wrist_temp_c`` (mean of per-minute
+    wrist temperature samples). Days with no sleep data are omitted.
+    """
+    df = _filter_recent(load_all_csv(), days)
+    if df.empty:
+        return _format_records([], days)
+    daily = _build_daily_frame(df, _SLEEP_AGGS)
+    return _format_records(_records_from_frame(daily), days)
+
+
+@mcp.tool()
+def get_daily_fitness(days: int = 14) -> str:
+    """One JSON record per day with activity and movement metrics.
+
+    Per-minute event streams (steps, energy, distance, exercise time,
+    stand time, flights) are summed. Walking speed and walking heart
+    rate are averaged. VO2 max takes the last non-null measurement of
+    the day. Days with no fitness data are omitted.
+    """
+    df = _filter_recent(load_all_csv(), days)
+    if df.empty:
+        return _format_records([], days)
+    daily = _build_daily_frame(df, _FITNESS_AGGS)
+    return _format_records(_records_from_frame(daily), days)
+
+
+@mcp.tool()
+def get_daily_vitals(days: int = 14) -> str:
+    """One JSON record per day with cardio, respiratory, and oxygen vitals.
+
+    HR uses min-of-mins, max-of-maxes, mean-of-avgs across the day.
+    Resting HR, HRV, respiratory rate, and blood-oxygen saturation are
+    averaged across all per-minute samples. Days with no vitals data
+    are omitted.
+    """
+    df = _filter_recent(load_all_csv(), days)
+    if df.empty:
+        return _format_records([], days)
+    daily = _build_daily_frame(df, _VITALS_AGGS)
+    return _format_records(_records_from_frame(daily), days)
+
+
+@mcp.tool()
+def get_baselines(days: int = 30) -> str:
+    """Distribution + recency stats for headline metrics over the last N days.
+
+    For each metric: ``p10``, ``p50``, ``p90`` of the per-day series,
+    ``yesterday`` (most recent day's value), ``yesterday_date``,
+    ``yesterday_vs_p50_pct``, ``trend_7d_vs_30d_pct``, and ``n_days``.
+    Useful for asking "is today unusual?" without re-analysing a long
+    history.
+    """
+    df = _filter_recent(load_all_csv(), days)
+    if df.empty:
+        return json.dumps({"baselines": [], "days_requested": days}, indent=2)
+
+    baselines = []
+    for key, col, agg in _BASELINE_AGGS:
+        series = _daily_series(df, col, agg).sort_index()
+        if series.empty:
+            continue
+        p50 = float(series.quantile(0.50))
+        latest = float(series.iloc[-1])
+        mean_30 = float(series.mean())
+        mean_7 = float(series.tail(7).mean()) if len(series) > 0 else None
+        rec = {
+            "metric": key,
+            "p10": _round_or_none(series.quantile(0.10)),
+            "p50": _round_or_none(p50),
+            "p90": _round_or_none(series.quantile(0.90)),
+            "yesterday": _round_or_none(latest),
+            "yesterday_date": str(series.index[-1]),
+            "yesterday_vs_p50_pct": (
+                _round_or_none((latest - p50) / p50 * 100, ndigits=1) if p50 else None
+            ),
+            "trend_7d_vs_30d_pct": (
+                _round_or_none((mean_7 - mean_30) / mean_30 * 100, ndigits=1)
+                if mean_30 and mean_7 is not None
+                else None
+            ),
+            "n_days": int(len(series)),
+        }
+        baselines.append(rec)
+
+    return json.dumps(
+        {"baselines": baselines, "days_requested": days},
+        indent=2,
+        default=str,
+    )
 
 
 mcp.settings.streamable_http_path = f"/mcp/{TOKEN}"

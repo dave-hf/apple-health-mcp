@@ -1,0 +1,8 @@
+Date/Time,Step Count (count),Heart Rate [Min] (count/min),Heart Rate [Max] (count/min),Heart Rate [Avg] (count/min),Resting Heart Rate (count/min),Heart Rate Variability (ms),Sleep Analysis [Total] (hr),Sleep Analysis [Asleep] (hr),Sleep Analysis [In Bed] (hr),Sleep Analysis [Core] (hr),Sleep Analysis [Deep] (hr),Sleep Analysis [REM] (hr),Sleep Analysis [Awake] (hr),Apple Sleeping Wrist Temperature (degC),Walking + Running Distance (km),Active Energy (kJ),Apple Exercise Time (min),Apple Stand Time (min),Flights Climbed (count),Walking Speed (km/hr),Walking Heart Rate Average (count/min),VO2 Max (ml/(kg·min)),Respiratory Rate (count/min),Blood Oxygen Saturation (%)
+2026-04-01 00:00:00,,,,,,,8.0,7.5,8.0,5.0,1.0,1.5,0.5,,,,,,,,,,,
+2026-04-01 09:00:00,1200,60,80,72,55,55,,,,,,,,35.5,0.9,250,5,10,1,4.5,72,,14.0,98
+2026-04-01 18:00:00,2300,65,90,88,,60,,,,,,,,,1.6,400,8,15,2,5.0,80,38.0,15.0,97
+2026-04-02 00:00:00,,,,,,,7.5,7.0,7.5,4.5,0.8,1.4,0.5,,,,,,,,,,,
+2026-04-02 09:00:00,1500,62,82,74,57,58,,,,,,,,36.0,1.1,300,6,12,1,4.7,74,,14.5,99
+2026-04-03 00:00:00,,,,,,,9.0,8.5,9.0,6.0,1.2,1.6,0.5,,,,,,,,,,,
+2026-04-03 09:00:00,2000,58,78,70,53,62,,,,,,,,35.7,1.5,350,10,18,3,4.8,76,39.0,13.5,98
