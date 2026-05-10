@@ -3,12 +3,14 @@
 The iPhone Health Auto Export app POSTs each export to /ingest as a multipart
 body. We strip the MIME envelope and write the inner CSV to disk.
 """
-from fastapi import FastAPI, Header, Request, HTTPException
-from dotenv import load_dotenv
-import os, pathlib
+import os
+import pathlib
 from datetime import datetime
 
-load_dotenv("/opt/health/.env")
+from dotenv import load_dotenv
+from fastapi import FastAPI, Header, HTTPException, Request
+
+load_dotenv(os.environ.get("DOTENV_PATH", "/opt/health/.env"))
 
 TOKEN = os.getenv("HEALTH_TOKEN")
 DATA_DIR = pathlib.Path(os.getenv("DATA_DIR", "/opt/health/data"))

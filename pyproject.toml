@@ -1,0 +1,22 @@
+# This repo is not packaged for distribution; pyproject.toml here exists
+# only to centralize tool configuration. Runtime deps live in requirements.txt
+# and dev-only deps live in requirements-dev.txt.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = ["deploy"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "E501",  # let formatter handle line length
+    "E741",  # ambiguous variable names are fine in this codebase
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
