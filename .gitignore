@@ -1,0 +1,45 @@
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# Health data exports
+data/
+*.csv
+*.parquet
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Local backups created by `install -b`
+*.bak
+*.bak.*
