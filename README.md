@@ -25,16 +25,28 @@ Apple Health data — without uploading anything to a third-party service.
 
 ## Features
 
-Six MCP tools out of the box:
+Ten MCP tools — four return compact JSON records that fit easily in any
+client's context, and six raw tools remain as the escape hatch.
+
+**Structured (one record per day per domain, JSON):**
+
+| Tool | Description | Default window |
+| --- | --- | --- |
+| `get_daily_sleep` | Sleep stages + wrist temperature, one record per night. | 14 days |
+| `get_daily_fitness` | Steps, distance, energy, exercise/stand time, flights, walking speed, walking HR, VO2 max — aggregated per day. | 14 days |
+| `get_daily_vitals` | Heart-rate min/max/avg, resting HR, HRV, respiratory rate, blood-oxygen — aggregated per day. | 14 days |
+| `get_baselines` | p10/p50/p90 + yesterday + 7d-vs-30d trend for every headline metric. | 30 days |
+
+**Raw / escape hatch:**
 
 | Tool | Description | Default window |
 | --- | --- | --- |
 | `list_metrics` | Lists every health metric with at least one data point. | n/a |
 | `get_latest` | Most recent non-empty snapshot across all metrics. | n/a |
 | `get_metric` | Time series for a single metric. | 30 days |
-| `get_summary` | Aggregated avg/min/max/last for the headline metrics. | 7 days |
-| `get_sleep` | Sleep stages plus wrist temperature. | 14 days |
-| `get_fitness` | Steps, HR (min/max/avg), HRV, resting HR, VO2 max, energy, exercise time, distance. | 14 days |
+| `get_summary` | avg/min/max/last for the headline metrics. | 7 days |
+| `get_sleep` | Raw sleep + wrist-temp rows. | 14 days |
+| `get_fitness` | Raw fitness + HR rows. | 14 days |
 
 The CSV exports are daily aggregates with 100+ columns, so any of those
 columns can be queried via `get_metric` even if no dedicated tool wraps them.
