@@ -5,8 +5,11 @@
 
 # Health data exports
 data/
+reports/
 *.csv
 *.parquet
+# Test fixtures are checked in.
+!tests/fixtures/*.csv
 
 # Python
 __pycache__/
