@@ -22,6 +22,22 @@ mcp = FastMCP("apple-health", stateless_http=True)
 mcp.settings.transport_security.enable_dns_rebinding_protection = False
 
 
+def _dir_signature() -> tuple:
+    """Cheap fingerprint of the data directory.
+
+    Each tool call recomputes this and compares against the cached signature;
+    a single ``stat`` per file is far cheaper than re-reading every CSV. The
+    fingerprint changes when a file is added, removed, or rewritten.
+    """
+    return tuple(
+        (f.name, f.stat().st_mtime_ns, f.stat().st_size)
+        for f in sorted(DATA_DIR.glob("health_*.csv"))
+    )
+
+
+_cache: tuple[tuple, pd.DataFrame] | None = None
+
+
 def _read_csv_tolerant(path: pathlib.Path) -> pd.DataFrame:
     """Read a CSV that may still carry a multipart MIME envelope.
 
@@ -46,23 +62,31 @@ def _read_csv_tolerant(path: pathlib.Path) -> pd.DataFrame:
 
 
 def load_all_csv() -> pd.DataFrame:
-    files = sorted(DATA_DIR.glob("health_*.csv"))
-    if not files:
-        return pd.DataFrame()
+    global _cache
+    sig = _dir_signature()
+    if _cache is not None and _cache[0] == sig:
+        return _cache[1]
+    if not sig:
+        _cache = (sig, pd.DataFrame())
+        return _cache[1]
     dfs = []
-    for f in files:
+    for name, _mtime, _size in sig:
+        f = DATA_DIR / name
         try:
             dfs.append(_read_csv_tolerant(f))
         except Exception as e:
             print(f"[load_all_csv] skipping {f.name}: {e}", flush=True)
     if not dfs:
-        return pd.DataFrame()
-    return (
+        _cache = (sig, pd.DataFrame())
+        return _cache[1]
+    df = (
         pd.concat(dfs)
         .drop_duplicates(subset=["Date/Time"])
         .sort_values("Date/Time")
         .reset_index(drop=True)
     )
+    _cache = (sig, df)
+    return df
 
 
 @mcp.tool()
