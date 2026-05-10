@@ -20,10 +20,14 @@ enabled, invoke the `/schedule` skill with these settings:
 - **Model:** `claude-opus-4-7` with extended thinking enabled.
 - **Connectors enabled:** Apple Health MCP. Add Notion or Gmail later if
   you decide to broadcast the report elsewhere.
-- **Prompt body:** the contents of [`health-report.prompt.md`](./health-report.prompt.md),
-  copied verbatim.
-- **Description:** "Daily Apple Health report — fitness analyst summarises
-  the last 24-48h and writes the report via save_health_report."
+- **Prompt body:** start from [`health-report.prompt.md`](./health-report.prompt.md),
+  but **fill in the `## User context` block first** with the specifics for
+  the user this routine runs for (see the structured comment in the file).
+  The committed version intentionally ships with a placeholder so the repo
+  contains no PII. Paste the populated version into `/schedule`; do not
+  push the populated version back to source control.
+- **Description:** "Daily Apple Health triage briefing — sensor-aware
+  morning report saved via `save_health_report`."
 
 ## Dry-run before scheduling
 
