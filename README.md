@@ -25,8 +25,8 @@ Apple Health data — without uploading anything to a third-party service.
 
 ## Features
 
-Ten MCP tools — four return compact JSON records that fit easily in any
-client's context, and six raw tools remain as the escape hatch.
+Twelve MCP tools — four return compact JSON daily records, two read/write a
+persisted daily HEALTH REPORT, and six raw tools remain as the escape hatch.
 
 **Structured (one record per day per domain, JSON):**
 
@@ -36,6 +36,16 @@ client's context, and six raw tools remain as the escape hatch.
 | `get_daily_fitness` | Steps, distance, energy, exercise/stand time, flights, walking speed, walking HR, VO2 max — aggregated per day. | 14 days |
 | `get_daily_vitals` | Heart-rate min/max/avg, resting HR, HRV, respiratory rate, blood-oxygen — aggregated per day. | 14 days |
 | `get_baselines` | p10/p50/p90 + yesterday + 7d-vs-30d trend for every headline metric. | 30 days |
+
+**Daily HEALTH REPORT (read/write):**
+
+| Tool | Description |
+| --- | --- |
+| `save_health_report` | Persist a markdown report at `<REPORTS_DIR>/<YYYY-MM-DD>.md`. Used by the scheduled report-generation routine. |
+| `get_health_report` | Read a report by date, or — with no `date` arg — the most recent report within `max_age_days`. The Fitness Coach Agent uses this to fetch each morning's briefing. |
+
+See [`routines/README.md`](routines/README.md) for how to set up the
+scheduled remote agent that calls `save_health_report` every morning.
 
 **Raw / escape hatch:**
 
@@ -60,14 +70,21 @@ apple-health-mcp/
 ├── ingest/main.py             FastAPI ingest service (port 8001)
 ├── mcp/server.py              FastMCP MCP server     (port 8002)
 ├── requirements.txt           Pinned Python dependencies
-├── .env.example               Template for the shared secret + data path
-└── deploy/
-    ├── nginx/
-    │   ├── ingest.example.conf   Reverse-proxy template for /ingest
-    │   └── mcp.example.conf      Reverse-proxy template for /mcp/<token>
-    └── supervisor/
-        ├── health-ingest.conf    process supervisor unit
-        └── health-mcp.conf       process supervisor unit
+├── .env.example               Template for the shared secret + data + reports paths
+├── deploy/
+│   ├── nginx/
+│   │   ├── ingest.example.conf   Reverse-proxy template for /ingest
+│   │   └── mcp.example.conf      Reverse-proxy template for /mcp/<token>
+│   └── supervisor/
+│       ├── health-ingest.conf    process supervisor unit
+│       └── health-mcp.conf       process supervisor unit
+├── routines/
+│   ├── health-report.prompt.md   Prompt source for the daily-report routine
+│   └── README.md                 How to schedule the routine via /schedule
+└── tests/
+    ├── test_loader.py
+    ├── test_smart_tools.py
+    └── test_report_tools.py
 ```
 
 Both Python services share a single virtualenv in production; the file layout
@@ -101,7 +118,7 @@ Adapt freely if you prefer plain `systemd` and hand-rolled Nginx.
 ### 1. Lay out files on the VPS
 
 ```bash
-sudo mkdir -p /opt/health/{data,ingest,mcp}
+sudo mkdir -p /opt/health/{data,ingest,mcp,reports}
 sudo chown -R www:www /opt/health   # match the user your supervisor unit runs as
 
 # Copy the source files

@@ -56,6 +56,10 @@ def _import_server(data_dir: Path):
 
     os.environ["HEALTH_TOKEN"] = "test-token"
     os.environ["DATA_DIR"] = str(data_dir)
+    # Tests that don't care about reports get a sibling reports/ dir for free.
+    reports_dir = data_dir.parent / "reports"
+    reports_dir.mkdir(exist_ok=True)
+    os.environ["REPORTS_DIR"] = str(reports_dir)
 
     sys.path.insert(0, str(REPO_ROOT / "mcp"))
     if "server" in sys.modules:
@@ -82,3 +86,15 @@ def populated_data_dir(tmp_data_dir: Path):
     shutil.copy(FIXTURES / "sample_clean.csv", tmp_data_dir / "health_clean.csv")
     shutil.copy(FIXTURES / "sample_wrapped.csv", tmp_data_dir / "health_wrapped.csv")
     return tmp_data_dir
+
+
+@pytest.fixture
+def reports_dir(tmp_path: Path):
+    """Empty reports dir paired with a fresh server module pointed at it."""
+    rd = tmp_path / "reports"
+    rd.mkdir()
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    server = _import_server(data_dir)
+    # _import_server set REPORTS_DIR to data_dir.parent/"reports"; that is rd.
+    return rd, server
