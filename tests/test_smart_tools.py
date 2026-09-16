@@ -75,6 +75,44 @@ def test_get_daily_vitals_aggregates_per_day(tmp_data_dir: Path):
     assert by_date["2026-04-01"]["blood_oxygen_pct"] == 97.5
 
 
+def test_get_daily_vitals_glucose_overnight_window_keyed_to_wake_date(tmp_data_dir: Path):
+    server = _server_with_smart_fixture(tmp_data_dir)
+    result = json.loads(server.get_daily_vitals(days=10000))
+
+    # Glucose rows must not create extra day records on their own.
+    assert result["days_returned"] == 3
+    by_date = {r["date"]: r for r in result["records"]}
+
+    # Night keyed 04-02 = 04-01 23:30 (6.0), 04-02 02:00 (4.0), 04-02 05:00 (8.0).
+    # 04-02 08:00 (7.0) is outside the half-open window; 12:00 (9.0) is daytime.
+    night = by_date["2026-04-02"]
+    assert night["glucose_night_n"] == 3
+    assert night["glucose_night_mean_mmol"] == 6.0
+    assert night["glucose_night_min_mmol"] == 4.0
+    assert night["glucose_night_max_mmol"] == 8.0
+    # 4.0 and 6.0 are inside 3.9-7.8 mmol/L; 8.0 is not -> 2/3.
+    assert night["glucose_night_tir_pct"] == 66.67
+
+    # Single sample night.
+    assert by_date["2026-04-03"]["glucose_night_n"] == 1
+    assert by_date["2026-04-03"]["glucose_night_mean_mmol"] == 5.0
+    assert by_date["2026-04-03"]["glucose_night_tir_pct"] == 100.0
+
+    # No CGM samples before the first night -> fields present but null.
+    assert by_date["2026-04-01"]["glucose_night_mean_mmol"] is None
+    assert by_date["2026-04-01"]["glucose_night_n"] is None
+
+
+def test_get_daily_vitals_without_glucose_column_emits_null_fields(populated_data_dir: Path):
+    server = _import_server(populated_data_dir)
+    result = json.loads(server.get_daily_vitals(days=10000))
+
+    assert result["days_returned"] > 0
+    for rec in result["records"]:
+        assert rec["glucose_night_mean_mmol"] is None
+        assert rec["glucose_night_tir_pct"] is None
+
+
 def test_get_baselines_orders_quantiles_and_marks_yesterday(tmp_data_dir: Path):
     server = _server_with_smart_fixture(tmp_data_dir)
     result = json.loads(server.get_baselines(days=10000))
@@ -92,6 +130,13 @@ def test_get_baselines_orders_quantiles_and_marks_yesterday(tmp_data_dir: Path):
     sleep = metrics["sleep_total_h"]
     assert sleep["yesterday"] == 9.0
     assert sleep["p10"] <= sleep["p50"] <= sleep["p90"]
+
+    # Overnight glucose mean is [6.0 (04-02), 5.0 (04-03)]; 04-01 has no CGM.
+    glucose = metrics["glucose_night_mean_mmol"]
+    assert glucose["n_days"] == 2
+    assert glucose["yesterday_date"] == "2026-04-03"
+    assert glucose["yesterday"] == 5.0
+    assert glucose["p50"] == 5.5
 
 
 def test_smart_tools_handle_empty_dir(tmp_data_dir: Path):

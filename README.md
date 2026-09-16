@@ -34,7 +34,7 @@ persisted daily HEALTH REPORT, and six raw tools remain as the escape hatch.
 | --- | --- | --- |
 | `get_daily_sleep` | Sleep stages + wrist temperature, one record per night. | 14 days |
 | `get_daily_fitness` | Steps, distance, energy, exercise/stand time, flights, walking speed, walking HR, VO2 max — aggregated per day. | 14 days |
-| `get_daily_vitals` | Heart-rate min/max/avg, resting HR, HRV, respiratory rate, blood-oxygen — aggregated per day. | 14 days |
+| `get_daily_vitals` | Heart-rate min/max/avg, resting HR, HRV, respiratory rate, blood-oxygen — aggregated per day — plus an overnight CGM glucose profile (mean/min/max, % time in 3.9–7.8 mmol/L, sample count over 22:00–08:00, keyed to the wake date). | 14 days |
 | `get_baselines` | p10/p50/p90 + yesterday + 7d-vs-30d trend for every headline metric. | 30 days |
 
 **Daily HEALTH REPORT (read/write):**

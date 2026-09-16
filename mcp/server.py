@@ -145,7 +145,24 @@ _BASELINE_AGGS = [
     ("walking_speed_kmh", "Walking Speed (km/hr)", "mean"),
 ]
 
-_INTEGER_FIELDS = {"steps", "flights"}
+# Continuous glucose monitor (CGM) samples arrive at ~5-min cadence all day.
+# The briefing cares about the overnight profile, so ``get_daily_vitals``
+# aggregates the window 22:00 (previous evening) .. 08:00 and keys it to the
+# wake date, matching how sleep records are keyed.
+_GLUCOSE_COL = "Blood Glucose (mmol/L)"
+_GLUCOSE_NIGHT_START_H = 22
+_GLUCOSE_NIGHT_END_H = 8
+_GLUCOSE_TIR_LOW_MMOL = 3.9
+_GLUCOSE_TIR_HIGH_MMOL = 7.8
+_GLUCOSE_NIGHT_FIELDS = [
+    "glucose_night_mean_mmol",
+    "glucose_night_min_mmol",
+    "glucose_night_max_mmol",
+    "glucose_night_tir_pct",
+    "glucose_night_n",
+]
+
+_INTEGER_FIELDS = {"steps", "flights", "glucose_night_n"}
 
 
 def _round_or_none(value, ndigits: int = 2):
@@ -175,6 +192,42 @@ def _daily_series(df: pd.DataFrame, col: str, agg: str) -> pd.Series:
 def _build_daily_frame(df: pd.DataFrame, aggs: list[tuple]) -> pd.DataFrame:
     cols = {key: _daily_series(df, col, agg) for key, col, agg in aggs}
     return pd.DataFrame(cols)
+
+
+def _glucose_night_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Overnight CGM aggregates keyed by wake date.
+
+    Samples between 22:00 and 08:00 are shifted forward so the whole night
+    lands on the morning's calendar date, then reduced to mean / min / max,
+    percent of samples inside 3.9-7.8 mmol/L (time in range) and sample
+    count. Returns an empty frame with the expected columns when the
+    glucose column is absent or has no samples in the window.
+    """
+    empty = pd.DataFrame({k: pd.Series([], dtype="float64") for k in _GLUCOSE_NIGHT_FIELDS})
+    if df.empty or _GLUCOSE_COL not in df.columns:
+        return empty
+    sub = df[df[_GLUCOSE_COL].notna()][["Date/Time", _GLUCOSE_COL]].copy()
+    if sub.empty:
+        return empty
+    shift_h = 24 - _GLUCOSE_NIGHT_START_H
+    shifted = sub["Date/Time"] + pd.Timedelta(hours=shift_h)
+    in_window = shifted.dt.hour < _GLUCOSE_NIGHT_END_H + shift_h
+    sub = sub[in_window]
+    if sub.empty:
+        return empty
+    sub["date"] = shifted[in_window].dt.date
+    values = sub[_GLUCOSE_COL]
+    in_range = values.between(_GLUCOSE_TIR_LOW_MMOL, _GLUCOSE_TIR_HIGH_MMOL)
+    grouped = values.groupby(sub["date"])
+    return pd.DataFrame(
+        {
+            "glucose_night_mean_mmol": grouped.mean(),
+            "glucose_night_min_mmol": grouped.min(),
+            "glucose_night_max_mmol": grouped.max(),
+            "glucose_night_tir_pct": in_range.groupby(sub["date"]).mean() * 100,
+            "glucose_night_n": grouped.size().astype("float64"),
+        }
+    )
 
 
 def _records_from_frame(daily: pd.DataFrame) -> list[dict]:
@@ -257,7 +310,7 @@ def get_summary(days: int = 7) -> str:
         "Resting Heart Rate (count/min)", "Sleep Analysis [Asleep] (hr)",
         "Sleep Analysis [Deep] (hr)", "Sleep Analysis [REM] (hr)",
         "Active Energy (kJ)", "VO2 Max (ml/(kg·min))", "Weight (kg)",
-        "Respiratory Rate (count/min)", "Blood Oxygen Saturation (%)",
+        "Respiratory Rate (count/min)", "Blood Oxygen Saturation (%)", _GLUCOSE_COL,
     ]
     available = [c for c in summary_cols if c in recent.columns and recent[c].notna().any()]
     out = [f"Health summary — last {days} days\n"]
@@ -340,17 +393,22 @@ def get_daily_fitness(days: int = 14) -> str:
 
 @mcp.tool()
 def get_daily_vitals(days: int = 14) -> str:
-    """One JSON record per day with cardio, respiratory, and oxygen vitals.
+    """One JSON record per day with cardio, respiratory, oxygen and glucose vitals.
 
     HR uses min-of-mins, max-of-maxes, mean-of-avgs across the day.
     Resting HR, HRV, respiratory rate, and blood-oxygen saturation are
-    averaged across all per-minute samples. Days with no vitals data
+    averaged across all per-minute samples. Continuous glucose monitor
+    samples are reduced to an overnight profile (``glucose_night_mean_mmol``,
+    ``glucose_night_min_mmol``, ``glucose_night_max_mmol``,
+    ``glucose_night_tir_pct`` = percent of samples in 3.9-7.8 mmol/L,
+    ``glucose_night_n``) over 22:00-08:00, keyed to the wake date; the
+    fields are null when no CGM data exists. Days with no vitals data
     are omitted.
     """
     df = _filter_recent(load_all_csv(), days)
     if df.empty:
         return _format_records([], days)
-    daily = _build_daily_frame(df, _VITALS_AGGS)
+    daily = _build_daily_frame(df, _VITALS_AGGS).join(_glucose_night_frame(df), how="outer")
     return _format_records(_records_from_frame(daily), days)
 
 
@@ -368,9 +426,12 @@ def get_baselines(days: int = 30) -> str:
     if df.empty:
         return json.dumps({"baselines": [], "days_requested": days}, indent=2)
 
+    per_day = [(key, _daily_series(df, col, agg)) for key, col, agg in _BASELINE_AGGS]
+    per_day.append(("glucose_night_mean_mmol", _glucose_night_frame(df)["glucose_night_mean_mmol"]))
+
     baselines = []
-    for key, col, agg in _BASELINE_AGGS:
-        series = _daily_series(df, col, agg).sort_index()
+    for key, series in per_day:
+        series = series.sort_index()
         if series.empty:
             continue
         p50 = float(series.quantile(0.50))
