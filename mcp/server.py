@@ -162,7 +162,26 @@ _GLUCOSE_NIGHT_FIELDS = [
     "glucose_night_n",
 ]
 
-_INTEGER_FIELDS = {"steps", "flights", "glucose_night_n"}
+# Food-log entries (third-party app -> HealthKit) arrive as one row per
+# logged meal with the macro totals for that meal. Daily totals are sums;
+# meal timing is reported separately so the briefing can pair the last meal
+# of the evening with the overnight glucose curve that follows it.
+_NUTRITION_ENERGY_COL = "Dietary Energy (kJ)"
+_NUTRITION_AGGS = [
+    ("dietary_energy_kj", _NUTRITION_ENERGY_COL, "sum"),
+    ("carbs_g", "Carbohydrates (g)", "sum"),
+    ("protein_g", "Protein (g)", "sum"),
+    ("fat_g", "Total Fat (g)", "sum"),
+    ("fiber_g", "Fiber (g)", "sum"),
+    ("sugar_g", "Sugar (g)", "sum"),
+    ("caffeine_mg", "Caffeine (mg)", "sum"),
+    ("water_ml", "Water (mL)", "sum"),
+    ("alcohol_drinks", "Alcohol Consumption (count)", "sum"),
+]
+_MEAL_TIMING_FIELDS = ["meals_logged", "first_meal_time", "last_meal_time", "last_meal_kj"]
+
+_INTEGER_FIELDS = {"steps", "flights", "glucose_night_n", "meals_logged"}
+_STRING_FIELDS = {"first_meal_time", "last_meal_time"}
 
 
 def _round_or_none(value, ndigits: int = 2):
@@ -230,6 +249,35 @@ def _glucose_night_frame(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def _meal_timing_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-day meal count and first / last logged-meal clock times.
+
+    A meal is any row carrying a dietary-energy value. Times are ``HH:MM``
+    strings; ``last_meal_kj`` is the energy of the latest meal of the day.
+    Returns an empty frame with the expected columns when there is no
+    food log.
+    """
+    empty = pd.DataFrame({k: pd.Series([], dtype="object") for k in _MEAL_TIMING_FIELDS})
+    if df.empty or _NUTRITION_ENERGY_COL not in df.columns:
+        return empty
+    sub = df[df[_NUTRITION_ENERGY_COL].notna()][["Date/Time", _NUTRITION_ENERGY_COL]].copy()
+    if sub.empty:
+        return empty
+    sub = sub.sort_values("Date/Time")
+    sub["date"] = sub["Date/Time"].dt.date
+    grouped = sub.groupby("date")
+    first = grouped["Date/Time"].min()
+    last = grouped["Date/Time"].max()
+    return pd.DataFrame(
+        {
+            "meals_logged": grouped.size().astype("float64"),
+            "first_meal_time": first.dt.strftime("%H:%M"),
+            "last_meal_time": last.dt.strftime("%H:%M"),
+            "last_meal_kj": grouped[_NUTRITION_ENERGY_COL].last(),
+        }
+    )
+
+
 def _records_from_frame(daily: pd.DataFrame) -> list[dict]:
     if daily.empty:
         return []
@@ -239,6 +287,10 @@ def _records_from_frame(daily: pd.DataFrame) -> list[dict]:
             continue
         rec: dict = {"date": str(date)}
         for col in daily.columns:
+            if col in _STRING_FIELDS:
+                raw = row[col]
+                rec[col] = None if raw is None or pd.isna(raw) else str(raw)
+                continue
             value = _round_or_none(row[col])
             if value is not None and col in _INTEGER_FIELDS:
                 value = int(round(value))
@@ -409,6 +461,29 @@ def get_daily_vitals(days: int = 14) -> str:
     if df.empty:
         return _format_records([], days)
     daily = _build_daily_frame(df, _VITALS_AGGS).join(_glucose_night_frame(df), how="outer")
+    return _format_records(_records_from_frame(daily), days)
+
+
+@mcp.tool()
+def get_daily_nutrition(days: int = 14) -> str:
+    """One JSON record per day with logged food intake and meal timing.
+
+    Food-log entries written to HealthKit by a third-party app are summed
+    per calendar day: ``dietary_energy_kj``, ``carbs_g``, ``protein_g``,
+    ``fat_g``, ``fiber_g``, ``sugar_g``, ``caffeine_mg``, ``water_ml``,
+    ``alcohol_drinks``. Meal timing is derived from rows carrying dietary
+    energy: ``meals_logged`` (count), ``first_meal_time`` and
+    ``last_meal_time`` (``HH:MM``, local time) and ``last_meal_kj``.
+    Pair ``last_meal_time`` with the *next* wake date's
+    ``glucose_night_*`` fields from ``get_daily_vitals`` to relate the
+    evening's food to the overnight glucose curve. Food logs are partial
+    by nature — a day with no record means nothing was logged, not that
+    nothing was eaten. Days with no nutrition data are omitted.
+    """
+    df = _filter_recent(load_all_csv(), days)
+    if df.empty:
+        return _format_records([], days)
+    daily = _build_daily_frame(df, _NUTRITION_AGGS).join(_meal_timing_frame(df), how="outer")
     return _format_records(_records_from_frame(daily), days)
 
 
