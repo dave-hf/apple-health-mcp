@@ -113,6 +113,58 @@ def test_get_daily_vitals_without_glucose_column_emits_null_fields(populated_dat
         assert rec["glucose_night_tir_pct"] is None
 
 
+def test_get_daily_nutrition_sums_meals_and_reports_timing(tmp_data_dir: Path):
+    server = _server_with_smart_fixture(tmp_data_dir)
+    result = json.loads(server.get_daily_nutrition(days=10000))
+
+    # 04-03 has no food log at all -> omitted, not emitted as nulls.
+    assert result["days_returned"] == 2
+    by_date = {r["date"]: r for r in result["records"]}
+    assert set(by_date) == {"2026-04-01", "2026-04-02"}
+
+    # 04-01: meals at 08:30 (2000 kJ) and 21:45 (3000 kJ).
+    day1 = by_date["2026-04-01"]
+    assert day1["dietary_energy_kj"] == 5000.0
+    assert day1["carbs_g"] == 120.0
+    assert day1["protein_g"] == 50.0
+    assert day1["fat_g"] == 35.0
+    assert day1["fiber_g"] == 13.0
+    assert day1["sugar_g"] == 32.0
+    assert day1["caffeine_mg"] == 80.0
+    assert day1["water_ml"] == 750.0
+    assert day1["alcohol_drinks"] == 1.0
+    assert day1["meals_logged"] == 2
+    assert day1["first_meal_time"] == "08:30"
+    assert day1["last_meal_time"] == "21:45"
+    assert day1["last_meal_kj"] == 3000.0
+
+    # 04-02: single meal, no caffeine / water / alcohol logged.
+    day2 = by_date["2026-04-02"]
+    assert day2["dietary_energy_kj"] == 2500.0
+    assert day2["meals_logged"] == 1
+    assert day2["first_meal_time"] == "13:00"
+    assert day2["last_meal_time"] == "13:00"
+    assert day2["caffeine_mg"] is None
+    assert day2["water_ml"] is None
+    assert day2["alcohol_drinks"] is None
+
+
+def test_get_daily_nutrition_without_food_log_returns_no_records(populated_data_dir: Path):
+    server = _import_server(populated_data_dir)
+    result = json.loads(server.get_daily_nutrition(days=10000))
+    assert result["days_returned"] == 0
+    assert result["records"] == []
+
+
+def test_nutrition_rows_do_not_add_days_to_other_daily_tools(tmp_data_dir: Path):
+    server = _server_with_smart_fixture(tmp_data_dir)
+    # Food-log rows at 08:30 / 21:45 / 13:00 must not create extra day
+    # records in tools that do not aggregate nutrition columns.
+    assert json.loads(server.get_daily_vitals(days=10000))["days_returned"] == 3
+    assert json.loads(server.get_daily_fitness(days=10000))["days_returned"] == 3
+    assert json.loads(server.get_daily_sleep(days=10000))["days_returned"] == 3
+
+
 def test_get_baselines_orders_quantiles_and_marks_yesterday(tmp_data_dir: Path):
     server = _server_with_smart_fixture(tmp_data_dir)
     result = json.loads(server.get_baselines(days=10000))
@@ -144,4 +196,5 @@ def test_smart_tools_handle_empty_dir(tmp_data_dir: Path):
     assert json.loads(server.get_daily_sleep(days=14))["days_returned"] == 0
     assert json.loads(server.get_daily_fitness(days=14))["days_returned"] == 0
     assert json.loads(server.get_daily_vitals(days=14))["days_returned"] == 0
+    assert json.loads(server.get_daily_nutrition(days=14))["days_returned"] == 0
     assert json.loads(server.get_baselines(days=30))["baselines"] == []

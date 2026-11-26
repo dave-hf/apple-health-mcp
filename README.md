@@ -25,7 +25,7 @@ Apple Health data — without uploading anything to a third-party service.
 
 ## Features
 
-Twelve MCP tools — four return compact JSON daily records, two read/write a
+Thirteen MCP tools — five return compact JSON daily records, two read/write a
 persisted daily HEALTH REPORT, and six raw tools remain as the escape hatch.
 
 **Structured (one record per day per domain, JSON):**
@@ -35,6 +35,7 @@ persisted daily HEALTH REPORT, and six raw tools remain as the escape hatch.
 | `get_daily_sleep` | Sleep stages + wrist temperature, one record per night. | 14 days |
 | `get_daily_fitness` | Steps, distance, energy, exercise/stand time, flights, walking speed, walking HR, VO2 max — aggregated per day. | 14 days |
 | `get_daily_vitals` | Heart-rate min/max/avg, resting HR, HRV, respiratory rate, blood-oxygen — aggregated per day — plus an overnight CGM glucose profile (mean/min/max, % time in 3.9–7.8 mmol/L, sample count over 22:00–08:00, keyed to the wake date). | 14 days |
+| `get_daily_nutrition` | Food-log totals per day (dietary energy, carbs, protein, fat, fiber, sugar, caffeine, water, alcohol) plus meal timing (`meals_logged`, `first_meal_time`, `last_meal_time`, `last_meal_kj`) so a late meal can be paired with the following night's glucose profile. Days with no log are omitted. | 14 days |
 | `get_baselines` | p10/p50/p90 + yesterday + 7d-vs-30d trend for every headline metric. | 30 days |
 
 **Daily HEALTH REPORT (read/write):**
@@ -285,7 +286,7 @@ Things on the wishlist (PRs welcome):
   call. Cache key on the directory's modification time.
 - **Storage rollup** — append each ingested CSV into a single Parquet (or
   DuckDB) file and dedupe by `Date/Time` at write time.
-- **More tools** — trends/regressions, period-over-period comparisons, nutrition,
+- **More tools** — trends/regressions, period-over-period comparisons,
   workouts, anomaly detection, recovery score.
 - **Health check** on the MCP server (`GET /healthz`) plus a freshness alert
   when no CSV has arrived in 48 hours.
